@@ -133,20 +133,23 @@ class Bot:
         # Get the base url
         self.bot.get(self.base_url)
 
-        login_button = WebDriverWait(
-            self.bot,
-            20,
-            ignored_exceptions=(StaleElementReferenceException,)
-        ).until(
-            EC.element_to_be_clickable(
-                (
-                    By.XPATH,
-                    "//button[.//span[normalize-space()='Log in']]"
+        try:
+
+            login_button = WebDriverWait(
+                self.bot,
+                5,
+                ignored_exceptions=(StaleElementReferenceException,)
+            ).until(
+                EC.element_to_be_clickable(
+                    (
+                        By.XPATH,
+                        "//button[.//span[normalize-space()='Log in']]"
+                    )
                 )
             )
-        )
-
-        login_button.click()
+            login_button.click()
+        except:
+            print(f"\n{WARNING}Login link not found, proceeding...{ENDC}\n")
     
         # Check if there is existing cookie
         stored_session = None
