@@ -13,10 +13,10 @@ ONE_TARGET_THREADS = False
 # SCRAPING CONFIG
 NUMBER_OF_SCRAPING_THREADS = config('NUMBER_OF_SCRAPING_THREADS', cast=int)
 SCRAPE_ACCOUNTS = {
-    "rowmangatz": "cixa8105",
-    # "yankovgrn": "diff7080",
-    # "fredtio67": "xipza333",
-    # "kopn86670": "fixx8888"
+    "fredtio67": "xipza333",
+    "lalyathebomb": "rimxa111",
+    "snwnen4": "xxpp8888",
+    "yankovgrn": "diff7080"
 }
 
 # LIMITS
