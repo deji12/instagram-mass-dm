@@ -803,57 +803,55 @@ if __name__ == "__main__":
                                                                                                                                                              
     """)
 
-    while True:
+    operation = input(
+        f"\n\n{HEADER}Operations:{ENDC}"
+        f"\n{OKGREEN}-> 1. Fetch followers of target accounts"
+        "\n-> 2. Clear fetched followers of target accounts"
+        f"\n-> 3. Run mass dm"
+        f"\n-> 4. Generate cookies for bot accounts"
+        f"\n-> 5. Find user by username"
+        f"\n-> 6. Exit{ENDC}"
+        "\n: "
+    )
 
-        operation = input(
-            f"\n\n{HEADER}Operations:{ENDC}"
-            f"\n{OKGREEN}-> 1. Fetch followers of target accounts"
-            "\n-> 2. Clear fetched followers of target accounts"
-            f"\n-> 3. Run mass dm"
-            f"\n-> 4. Generate cookies for bot accounts"
-            f"\n-> 5. Find user by username"
-            f"\n-> 6. Exit{ENDC}"
-            "\n: "
-        )
+    if operation == "3":
+        
+        print("\n")
 
-        if operation == "3":
-            
-            print("\n")
+        # Calling the function
+        try:
+            rotation()
+        except KeyboardInterrupt:
+            print(f"{OKGREEN}Exiting....{ENDC}")
+            exit(1)
+        except Exception as e: 
+            LOGFILE.write(f"[ROTATION] - {e}\n")
+            print(f"{FAIL}Something went wrong...{ENDC}\n{WARNING}Check your log files...{ENDC}")
+        finally:
+            # Close LOGFILE & HISTORY
+            LOGFILE.close()
+            HISTORY.close()
 
-            # Calling the function
-            try:
-                rotation()
-            except KeyboardInterrupt:
-                print(f"{OKGREEN}Exiting....{ENDC}")
-                exit(1)
-            except Exception as e: 
-                LOGFILE.write(f"[ROTATION] - {e}\n")
-                print(f"{FAIL}Something went wrong...{ENDC}\n{WARNING}Check your log files...{ENDC}")
-            finally:
-                # Close LOGFILE & HISTORY
-                LOGFILE.close()
-                HISTORY.close()
+    elif operation == "2":
+        clear_fetched_followers()
 
-        elif operation == "2":
-            clear_fetched_followers()
+    elif operation == "1":
+        from followers import fetch_target_account_followers
+        fetch_target_account_followers()
 
-        elif operation == "1":
-            from followers import fetch_target_account_followers
-            fetch_target_account_followers()
+    elif operation == "4":
+        from cookie import generate_cookies
+        generate_cookies()
 
-        elif operation == "4":
-            from cookie import generate_cookies
-            generate_cookies()
+    elif operation == "5":
+        find_user()
 
-        elif operation == "5":
-            find_user()
+    elif operation == "6":
+        # break
+        exit()
 
-        elif operation == "6":
-            # break
-            exit()
-
-        else:
-            print(f"\n{FAIL}Invalid option entered{ENDC}\n")
+    else:
+        print(f"\n{FAIL}Invalid option entered{ENDC}\n")
 
 
 
