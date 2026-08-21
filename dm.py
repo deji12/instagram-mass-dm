@@ -838,6 +838,10 @@ if not 'targetted_mass_dm' in os.listdir('.'): os.mkdir('./targetted_mass_dm')
 
 if not 'cache' in os.listdir('./targetted_mass_dm'): os.mkdir('./targetted_mass_dm/cache')
 
+with open("./targetted_mass_dm/targetted_usernames.txt", "a"):
+    pass
+
+
 # A list of processed usernames to prevent the threads from
 # processing the same username more than once.
 EMAIL_CREDENTIALS = {}
@@ -1311,7 +1315,7 @@ if __name__ == "__main__":
                 print(f"{FAIL}Your targetted_mass_dm folder must contain a{ENDC} {WARNING}targetted_usernames.txt{ENDC} {FAIL}file{ENDC}")
 
             # if targetted_usernames.txt is only file present, then create batch files
-            if os.listdir('targetted_mass_dm') == ['targetted_usernames.txt']:
+            if os.listdir('targetted_mass_dm') == ['cache', 'targetted_usernames.txt']:
                 chunk_and_slit_targetted_followers()
                 # exit()
 
