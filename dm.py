@@ -4,6 +4,7 @@ import json
 import psutil
 import re
 import time
+import math
 from pathlib import Path
 import shutil
 
@@ -38,7 +39,7 @@ gecko_service = Service('geckodriver.exe')
 chrome_service = Service('chromedriver.exe')
 
 class Bot:
-    def __init__(self, username, password, target, message, driver="Chrome", cookie=False, counter=None, is_instagrapi_request=False):
+    def __init__(self, username, password, target, message, driver="Chrome", cookie=False, counter=None, is_instagrapi_request=False, is_selenium_mass_dm=False):
         # Initialized variables
         self.username = username
         self.password = password
@@ -46,8 +47,9 @@ class Bot:
         self.message = message
         self.cookie = cookie
         self.is_instagrapi_request = is_instagrapi_request
+        self.is_selenium_mass_dm = is_selenium_mass_dm
 
-        if not is_instagrapi_request and cookie:
+        if not is_instagrapi_request:
 
             # Setting up Chrome with Options
             if driver == "Chrome":
@@ -211,14 +213,10 @@ class Bot:
 
         # Use get_followers if they do not exist for specified user
         target = self.target if self.target is not None else self.username
-        
-        # Get followers
-        self.__get_followers(target, counter)
 
-    def get_saved_session_id(self):
-        with open(f"cookies/{self.username}.json", 'r', encoding='utf-8') as f:
-            data = load(f)
-            return data.get('value')
+        if not self.is_selenium_mass_dm:
+            # Get followers
+            self.__get_followers(target, counter)
 
     def send_message(self, target, counter=None, same_target=None):
         """
@@ -268,12 +266,12 @@ class Bot:
         user_ids = get_saved_user_ids(target)
 
         # Checks if previous history exists
-        path = f"./cache/{target}.{NUMBER_OF_THREADS}.{counter}.json" if ONE_TARGET_THREADS else f"./cache/{target}.json"
+        path = f"./cache/{target}.{NUMBER_OF_THREADS_}.{counter}.json" if ONE_TARGET_THREADS else f"./cache/{target}.json"
 
         # Calculate history split
         if ONE_TARGET_THREADS:
-            quotient, remainder = divmod(len(user_ids), NUMBER_OF_THREADS)
-            split = [quotient for i in range(NUMBER_OF_THREADS - remainder)] + [quotient + 1 for j in range(remainder)]
+            quotient, remainder = divmod(len(user_ids), NUMBER_OF_THREADS_)
+            split = [quotient for i in range(NUMBER_OF_THREADS_ - remainder)] + [quotient + 1 for j in range(remainder)]
             shared = [sum(split[:i]) for i in range(0,10)]
 
         if os.path.isfile(path) and os.access(path, os.R_OK):
@@ -324,7 +322,7 @@ class Bot:
 
         # Authenticate instagrapi using the browser sessionid
         cl.login_by_sessionid(
-            self.get_saved_session_id()
+            self.get_saved_session_id(self.username)
         )
 
         for user_id in user_ids:
@@ -339,7 +337,7 @@ class Bot:
                 if hcount < shared[counter - 1]:
                     continue
 
-                if counter < NUMBER_OF_THREADS and hcount > shared[counter]:
+                if counter < NUMBER_OF_THREADS_ and hcount > shared[counter]:
                     break
 
             # Restore history
@@ -405,6 +403,338 @@ class Bot:
         # get_follower_usernames.close()
 
         return message_count, completed
+
+    
+    def send_message_via_selenium(self, target, counter=None):
+
+        PROCESSED_USERNAMES = []
+
+        """
+            Send a direct message to an account.
+
+            private method -> only accessible within class
+        """
+        # Go to messages
+        self.bot.get(self.base_url + "direct/inbox")
+        time.sleep(5)
+
+        # Remove pop up if any
+        self.bot.execute_script(
+            """
+            Array.from(document.querySelectorAll('button')).forEach(function(button){
+                // Check if 'Not Now'
+                if(button.innerText == 'Not Now'){
+                    button.click();
+                }
+            });
+        """
+        )
+        time.sleep(2)
+
+        # Clicks on pencil icon
+        self.bot.execute_script(
+            """
+            Array.from(document.querySelectorAll("[role='button']")).forEach(function(button){
+                // Check for the pencil icon
+                if(button.querySelector("[aria-label='New message']")){
+                    button.click();
+                }
+            });
+        """
+        )
+        time.sleep(7)
+        
+        # Get the target followers from the preexisting checks
+        targetted_usernames = open(f'targetted_mass_dm/{target}.txt', 'r')
+
+        # Get all the usernames
+        usernames = targetted_usernames.readlines()
+        usernames = [u.replace("\n", "") for u in usernames]
+
+        targetted_usernames.close()
+
+        path = f"./targetted_mass_dm/cache/{target}.json"
+
+        history = None
+
+        # Calculate history split
+        if ONE_TARGET_THREADS:
+            quotient, remainder = divmod(len(usernames), NUMBER_OF_THREADS_)
+            split = [quotient for i in range(NUMBER_OF_THREADS_ - remainder)] + [quotient + 1 for j in range(remainder)]
+            shared = [sum(split[:i]) for i in range(0,10)]
+
+        if os.path.isfile(path) and os.access(path, os.R_OK):
+            # Restore from previous history
+            print (f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{self.username}]{ENDC} {WARNING}-{ENDC} Restoring history from last run.")
+            #usernames = usernames[history["line"]:shared[counter-1]] if ONE_TARGET_THREADS else usernames[history["line"]:]
+
+        else:
+            # Create new history
+            # Store and save in cache
+            with open(path, 'a', encoding='utf-8') as f: dump({
+                "username": usernames[shared[counter-1]] if ONE_TARGET_THREADS else usernames[0],
+                "line": shared[counter-1] if ONE_TARGET_THREADS else 1
+            }, f, ensure_ascii=False, indent=4)
+
+        with open(path, "r") as f:
+            history = load(f)
+                
+        # Make sure to break if username file is empty -> messages have been sent to all users in this case
+        if not usernames:
+            print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{self.username}]{ENDC} {WARNING}-{ENDC} No usernames to process.")
+            return False
+
+        # Number of messages sent
+        message_count = 0
+        
+        # History Number
+        hcount = 0
+
+        for username in usernames:
+            # Increment hcount
+            hcount += 1
+
+            # Remove any whitespace
+            username = username.strip()
+
+            # Make sure a value is returned, else break out of current iteration
+            if not username or username in PROCESSED_USERNAMES:
+                continue
+
+            # Make sure it starts from the right line number in ONE_TARGET_THREADS
+            if ONE_TARGET_THREADS:
+                if hcount < shared[counter-1]: continue
+                if counter < 10 and hcount > shared[counter]: return False
+
+            # Make sure it starts from the right line following restored history data
+            if history and hcount < history["line"]: continue
+
+            # Add to processed usernames
+            PROCESSED_USERNAMES.append(username)
+
+            if message_count >= MAX_MESSAGE_PER_ROTATION:
+                # Break if max per rotation is reached
+                break
+
+
+            self.bot.find_element(
+                By.XPATH, '//input[@name="queryBox"]'
+            ).send_keys(username)
+
+            time.sleep(3)
+
+            wait = WebDriverWait(self.bot, 10)
+
+
+            # =========================================================
+            # 1. Search for username
+            # =========================================================
+
+            search_input = wait.until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, 'input[name="queryBox"]')
+                )
+            )
+
+            search_input.click()
+            search_input.send_keys(Keys.CONTROL + "a")
+            search_input.send_keys(username)
+
+
+            # =========================================================
+            # 2. Wait for results
+            # =========================================================
+
+            wait.until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, '[role="listbox"] [role="option"]')
+                )
+            )
+
+
+            # =========================================================
+            # 3. Select exact username
+            # =========================================================
+
+            user_found = False
+
+            options = self.bot.find_elements(
+                By.CSS_SELECTOR,
+                '[role="listbox"] [role="option"]'
+            )
+
+            for option in options:
+
+                username_elements = option.find_elements(
+                    By.CSS_SELECTOR,
+                    'span[dir="auto"]'
+                )
+
+                if any(
+                    element.text.strip() == username
+                    for element in username_elements
+                ):
+
+                    checkbox = option.find_element(
+                        By.CSS_SELECTOR,
+                        'input[name="IGDRecipientContactSearchResultCheckbox"]'
+                    )
+
+                    self.bot.execute_script(
+                        "arguments[0].click();",
+                        checkbox
+                    )
+
+                    user_found = True
+                    break
+
+
+            # =========================================================
+            # 4. Click Chat
+            # =========================================================
+
+            if user_found:
+
+                # print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{self.username}]{ENDC} {WARNING}-{ENDC} Selected {WARNING}->{ENDC} {OKCYAN}{username}{ENDC}")
+
+                chat_button = wait.until(
+                    EC.presence_of_element_located(
+                        (
+                            By.XPATH,
+                            "//div[@role='button' and normalize-space()='Chat']"
+                        )
+                    )
+                )
+
+                self.bot.execute_script(
+                    "arguments[0].click();",
+                    chat_button
+                )
+
+            else:
+
+                print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{self.username}]{ENDC} {WARNING}-{ENDC}{FAIL} Could not find{ENDC} {WARNING}->{ENDC} {OKCYAN}{username}{ENDC}")    
+                continue
+
+            time.sleep(4)
+
+            safeToSend = True
+
+            try:
+
+                message_box = wait.until(
+                    EC.presence_of_element_located(
+                        (
+                            By.CSS_SELECTOR,
+                            '[role="textbox"][contenteditable="true"][data-lexical-editor="true"]'
+                        )
+                    )
+                )
+
+                # Focus the editor
+                self.bot.execute_script(
+                    "arguments[0].focus();",
+                    message_box
+                )
+
+                # Insert the message without ChromeDriver.send_keys()
+                self.bot.execute_script(
+                    """
+                    const editor = arguments[0];
+                    const message = arguments[1];
+
+                    editor.focus();
+
+                    const selection = window.getSelection();
+                    const range = document.createRange();
+
+                    range.selectNodeContents(editor);
+                    range.collapse(false);
+
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+
+                    const textNode = document.createTextNode(message);
+                    range.insertNode(textNode);
+
+                    range.setStartAfter(textNode);
+                    range.collapse(true);
+
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+
+                    editor.dispatchEvent(
+                        new InputEvent('input', {
+                            inputType: 'insertText',
+                            data: message,
+                            bubbles: true
+                        })
+                    );
+                    """,
+                    message_box,
+                    self.message
+                )
+
+            except Exception as e:
+
+                print(f"Error typing message: {e}")
+                safeToSend = False
+
+            if safeToSend:
+
+                try:
+
+                    message_box = wait.until(
+                        EC.presence_of_element_located(
+                            (
+                                By.CSS_SELECTOR,
+                                '[role="textbox"][contenteditable="true"][data-lexical-editor="true"]'
+                            )
+                        )
+                    )
+
+                    message_box.send_keys(Keys.ENTER)
+
+                    print(
+                        f"{HEADER}[Account Group {counter}]{ENDC}"
+                        f"{OKGREEN}[{self.username}]{ENDC} "
+                        f"{WARNING}-{ENDC} sent message to "
+                        f"{WARNING}->{ENDC} {OKCYAN}{username}{ENDC}"
+                    )
+
+                    data = {
+                        "username": username,
+                        "line": hcount
+                    }
+        
+                    with open(path, 'w', encoding='utf-8') as f:
+                        dump(
+                            data,
+                            f,
+                            ensure_ascii=False,
+                            indent=4
+                        )
+
+                except Exception as e:
+
+                    print(f"Error sending message: {e}")
+                    safeToSend = False
+
+            # Clicks on the pencil icon
+            self.bot.execute_script(
+                """
+                Array.from(document.querySelectorAll("[role='button']")).forEach(function(button){
+                    // Check for the pencil icon
+                    if(button.querySelector("[aria-label='New message']")){
+                        button.click();
+                    }
+                });
+            """
+            )
+            time.sleep(4)
+
+        return message_count > 0
+    
     
     def sigkill(self):
         """
@@ -504,6 +834,10 @@ if not 'cookies' in os.listdir('.'): os.mkdir('./cookies')
 # Create the users directory (that stores usernames files) if not created
 if not 'users' in os.listdir('.'): os.mkdir('./users')
 
+if not 'targetted_mass_dm' in os.listdir('.'): os.mkdir('./targetted_mass_dm')
+
+if not 'cache' in os.listdir('./targetted_mass_dm'): os.mkdir('./targetted_mass_dm/cache')
+
 # A list of processed usernames to prevent the threads from
 # processing the same username more than once.
 EMAIL_CREDENTIALS = {}
@@ -545,6 +879,10 @@ def get_saved_user_ids(target):
     with open(f"users/{target}.txt", "r") as f:
         return [user_id.strip() for user_id in f.readlines()]
 
+def get_saved_session_id(username):
+    with open(f"cookies/{username}.json", 'r', encoding='utf-8') as f:
+        data = load(f)
+        return data.get('value')
 
 
 # def send_message(username, session_id, message) -> list:
@@ -680,28 +1018,107 @@ def init(accounts, target, counter):
         f"{OKGREEN}Message(s) sent for today!{ENDC}"
     )
 
-def targets():
+
+def init_selenium(accounts, target, counter):
     """
-        Extract targets from txt.
+        Initialize the Bot class and run the mass dm fuctionality
+        with 3 users in queue.
     """
-    # Get the targets
-    target = []
-    targets_txt = open("targets.txt", "r")
 
-    # Extract targets from the file
-    for t in targets_txt.readlines(): target.append(t.replace("\n",""))
+    # Initialize a dictionary to keep track of the number of messages sent per user
+    message_counts = {username: 0 for username in accounts}
+    
+    # Loop until all users have reached their daily message limit
+    while any(count < MAX_MESSAGE_PER_DAY for count in message_counts.values()):
+        for username, password in accounts.items():
+            # Check if the daily limit has been reached for the current user
+            if message_counts[username] < MAX_MESSAGE_PER_DAY:
+                # Create a Bot instance and send messages
+                try:
 
-    # Return targets
-    targets_txt.close()
-    return target
+                    bot = Bot(
+                        username, 
+                        password, 
+                        target, 
+                        MESSAGE, 
+                        counter=counter,
+                        is_selenium_mass_dm = True
+                    )
 
-def rotation():
+                    # End if bot can't send messages
+                    if bot.challenge() is True and bot.cookie is False: 
+                        print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{username}]{ENDC} {WARNING}-{ENDC} Can't send messages {username} because of expired cookies.")
+                        bot.bot.quit()
+                        bot.bot.close()
+                        bot.sigkill()
+                        continue
+
+                    else:
+                        # Notify
+                        print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{username}]{ENDC} {WARNING}-{ENDC} Sending messages with {username}...")
+
+                        # Use same target
+                        if bot.send_message_via_selenium(target, counter):
+                            # If messages were sent, update the message count
+                            message_counts[username] += MAX_MESSAGE_PER_ROTATION
+
+                        else:
+                            # If no messages were sent, assume user file is empty
+                            print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{username}]{ENDC} {WARNING}-{ENDC} Successfully sent message to all followers")
+                            message_counts[username] = MAX_MESSAGE_PER_DAY
+
+                    # End window session
+                    bot.bot.quit()
+                    bot.bot.close()
+                    bot.sigkill()
+                    
+                    # Wait for 5 seconds before starting the next iteration
+                    time.sleep(5)
+                except Exception as e: LOGFILE.write(f"[{username}][ERROR] {e}\n")
+                except exceptions as e: LOGFILE.write(f"[{username}][ERROR] {e}\n")
+
+            # If the daily limit is reached for the current user
+            else:
+                print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{username}]{ENDC} {WARNING}-{ENDC} Daily limit for message sending reached {WARNING}->{ENDC} {MAX_MESSAGE_PER_DAY}")
+
+    # When the program ends.
+    print(f"{HEADER}[Thread {counter}]{ENDC}{OKGREEN}[Account Group {counter}]{ENDC} {WARNING}-{ENDC}{OKGREEN}Message(s) sent for today!{ENDC}")
+
+
+def targets(targetted_usernames=False):
+    
+    if targetted_usernames:
+        folder_path = Path('./targetted_mass_dm')
+        targets = [file.stem for file in folder_path.iterdir() if file.is_file()]
+        targets.remove("targetted_usernames")
+        
+        # print(f'Targets: {targets}')
+        # exit()
+        return targets
+    else:
+
+        # Get the targets
+        target = []
+        targets_txt = open("targets.txt", "r")
+
+        # Extract targets from the file
+        for t in targets_txt.readlines(): target.append(t.replace("\n",""))
+
+        # Return targets
+        targets_txt.close()
+        return target
+
+def rotation(targeted_usernames=False):
     """
         Implementation of account rotation between multiple
         threads.
     """
+
     # Get the target account(s)
     print(f"{HEADER}START\n{'='*75}{ENDC}")
+
+    if targeted_usernames:
+        print(f"\n{OKGREEN}Initialising targetted usernames...{ENDC}\n")
 
     # Extract accounts
     accounts = account()
@@ -713,12 +1130,14 @@ def rotation():
     counter, target = 1, None
 
     # Extract targets
-    targetAll = None if targets() == [] else targets()
+    targetAll = targets(targeted_usernames)
 
     # Ensure targets are enough for threads
-    if len(targetAll) != NUMBER_OF_THREADS: 
-        if ONE_TARGET_THREADS: pass
-        else: return print(f"{FAIL}Your{ENDC} {WARNING}targets.txt{ENDC} {FAIL}file must have {NUMBER_OF_THREADS} targets.{ENDC}\n")
+    if not targeted_usernames and len(targetAll) != NUMBER_OF_THREADS_: 
+        if ONE_TARGET_THREADS: 
+            pass
+        else:
+            return print(f"{FAIL}Your{ENDC} {WARNING}targets.txt{ENDC} {FAIL}file must have {NUMBER_OF_THREADS_} targets.{ENDC}\n")
 
     # Distribute 10 accounts to each thread
     # number of accounts to run per thread
@@ -728,19 +1147,26 @@ def rotation():
         for username in accountGroup:
             if username is not None: accountArg[username] = accounts[username]
 
+       
         # Prompt for targets if targets.txt is empty
         try:
-            if targetAll is None:
+            if not targetAll:
                 while target is None:
                     target = input(f"Target Instagram for Group {counter}: ")
                     target = None if target == "" else target
             # Use extracted targets if any
             else:
                 target = targetAll[0] if ONE_TARGET_THREADS else targetAll[counter - 1]
-        except: continue
+        except: 
+            continue
+
 
         # Create thread for running accounts
-        thread = threading.Thread(target=init, name=f"Account Group {counter}", args=(accountArg, target, counter))
+        thread = threading.Thread(
+            target = init_selenium if targeted_usernames else init, 
+            name=f"Account Group {counter}", 
+            args=(accountArg, target, counter)
+        )
 
         # Show in terminal or console
         print(f"{HEADER}[{thread.name}]{ENDC} - {OKGREEN}{target} running with {len(thread._args[0])} accounts{ENDC}")
@@ -792,6 +1218,33 @@ def find_user():
     except Exception as e:
         print(f"\n{FAIL}An error occured:{ENDC} \n{WARNING}{e}{ENDC}\n")
 
+def chunk_and_slit_targetted_followers():
+
+
+    with open("targetted_mass_dm/targetted_usernames.txt", "r", encoding="utf-8") as file:
+        lines = file.readlines()
+
+    total_lines = len(lines)
+    chunk_size = math.ceil(total_lines / 4)
+
+    # 3. Split the list and write to N (threads) individual text files
+    print(NUMBER_OF_THREADS_)
+    for i in range(NUMBER_OF_THREADS_):
+        start_index = i * chunk_size
+        end_index = start_index + chunk_size
+        
+        # Slice the list for the current chunk
+        chunk_data = lines[start_index:end_index]
+        
+        # Define a unique filename for each part (e.g., output_part_1.txt)
+        output_filename = f"batch_{i + 1}.txt"
+        
+        # Write the chunk to its own file
+        with open(f"targetted_mass_dm/{output_filename}", "w", encoding="utf-8") as output_file:
+            output_file.writelines(chunk_data)
+
+    print(f"{OKGREEN} Successfully split {total_lines} lines into {NUMBER_OF_THREADS_} batches!{ENDC}")
+
 if __name__ == "__main__":
 
     print(f"""{OKGREEN}
@@ -813,7 +1266,8 @@ if __name__ == "__main__":
         f"\n-> 3. Run mass dm"
         f"\n-> 4. Generate cookies for bot accounts"
         f"\n-> 5. Find user by username"
-        f"\n-> 6. Exit{ENDC}"
+        f"\n-> 6. Run mass dm (Targetted usernames) -> Via selenium"
+        f"\n-> 7. Exit{ENDC}"
         "\n: "
     )
 
@@ -850,6 +1304,30 @@ if __name__ == "__main__":
         find_user()
 
     elif operation == "6":
+
+        try:
+
+            if not 'targetted_usernames.txt' in os.listdir('./targetted_mass_dm'):
+                print(f"{FAIL}Your targetted_mass_dm folder must contain a{ENDC} {WARNING}targetted_usernames.txt{ENDC} {FAIL}file{ENDC}")
+
+            # if targetted_usernames.txt is only file present, then create batch files
+            if os.listdir('targetted_mass_dm') == ['targetted_usernames.txt']:
+                chunk_and_slit_targetted_followers()
+                # exit()
+
+            rotation(targeted_usernames=True)
+        except KeyboardInterrupt:
+            print(f"{OKGREEN}Exiting....{ENDC}")
+            exit(1)
+        except Exception as e: 
+            LOGFILE.write(f"[ROTATION] - {e}\n")
+            print(f"{FAIL}Something went wrong...{ENDC}\n{WARNING}Check your log files...{ENDC}")
+        finally:
+            # Close LOGFILE & HISTORY
+            LOGFILE.close()
+            HISTORY.close()
+
+    elif operation == "7":
         # break
         exit()
 

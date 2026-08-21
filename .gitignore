@@ -3,3 +3,5 @@ geckodriver.exe
 .vscode
 __pycache__
 Pipfile
+users/
+logs.txt
