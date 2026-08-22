@@ -1,5 +1,5 @@
 # ============================================================
-# bot.py – Fully corrected with robust Selenium DM
+# bot.py – Final corrected version with shared history & robust fatal error handling
 # ============================================================
 
 import os
@@ -15,7 +15,6 @@ import shutil
 import threading
 from pathlib import Path
 from sys import exit
-from itertools import zip_longest
 from json import dump, load
 from json.decoder import JSONDecodeError
 
@@ -25,9 +24,13 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.keys import Keys
-from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
+from selenium.common.exceptions import (
+    StaleElementReferenceException,
+    TimeoutException,
+    InvalidSessionIdException,
+    WebDriverException,
+)
 from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.action_chains import ActionChains
 
 from hikerapi import Client as HikerClient
 from instagrapi import Client as InstagrapiClient
@@ -41,6 +44,10 @@ chrome_service = Service('chromedriver.exe')
 
 # Global logger
 LOGFILE = open("./cache/logs.txt", "a")
+
+# Custom exception for session death
+class SessionDeadError(Exception):
+    pass
 
 # ============================================================
 # Helper functions (unchanged)
@@ -126,7 +133,6 @@ def create_proxy_extension(host, port, username, password):
     ext_filename = f"proxy_auth_{host}_{port}.zip"
     ext_path = os.path.join(ext_dir, ext_filename)
 
-    # Reuse if already exists (assumes credentials unchanged)
     if os.path.isfile(ext_path):
         return ext_path
 
@@ -180,13 +186,11 @@ def create_proxy_extension(host, port, username, password):
     """
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Write manifest and background script
         with open(os.path.join(tmpdir, "manifest.json"), "w") as f:
             f.write(manifest_json)
         with open(os.path.join(tmpdir, "background.js"), "w") as f:
             f.write(background_js)
 
-        # Zip them into the final path
         with zipfile.ZipFile(ext_path, 'w', zipfile.ZIP_DEFLATED) as zp:
             zp.write(os.path.join(tmpdir, "manifest.json"), "manifest.json")
             zp.write(os.path.join(tmpdir, "background.js"), "background.js")
@@ -215,6 +219,7 @@ class Bot:
                 chrome_options.add_experimental_option("excludeSwitches", ["enable-logging"])
                 chrome_options.add_argument('--log-level=3')
                 chrome_options.add_argument("--start-maximized")
+                # Headless is NOT used – full UI
 
                 if PROXY_HOST and PROXY_PORT:
                     ext_path = create_proxy_extension(PROXY_HOST, PROXY_PORT, PROXY_LOGIN, PROXY_PASSWORD)
@@ -226,7 +231,6 @@ class Bot:
                 gecko_options.add_argument("--start-maximized")
 
                 if PROXY_HOST and PROXY_PORT:
-                    proxy_url = f"http://{PROXY_LOGIN}:{PROXY_PASSWORD}@{PROXY_HOST}:{PROXY_PORT}"
                     gecko_options.set_preference("network.proxy.type", 1)
                     gecko_options.set_preference("network.proxy.http", PROXY_HOST)
                     gecko_options.set_preference("network.proxy.http_port", PROXY_PORT)
@@ -238,18 +242,22 @@ class Bot:
                 self.bot = webdriver.Firefox(options=gecko_options, service=gecko_service)
             else:
                 raise ValueError("Unsupported driver")
+
             self.base_url = "https://www.instagram.com/"
             self.login()
 
     # ---------- Login and helpers ----------
     def challenge(self):
         time.sleep(3)
-        challenge = self.bot.execute_script("""
-            return window.location.href.includes("/challenge/") || 
-                window.location.href.includes("auth_platform/codeentry/") ||
-                window.location.href.includes("accounts/suspended/") ||
-                window.location.href.includes("auth_platform/no_challenge//") 
-        """)
+        try:
+            challenge = self.bot.execute_script("""
+                return window.location.href.includes("/challenge/") || 
+                    window.location.href.includes("auth_platform/codeentry/") ||
+                    window.location.href.includes("accounts/suspended/") ||
+                    window.location.href.includes("auth_platform/no_challenge//") 
+            """)
+        except (InvalidSessionIdException, WebDriverException):
+            raise SessionDeadError("Browser session dead during challenge check")
         if challenge:
             time.sleep(2)
             self.bot.execute_script("""
@@ -269,9 +277,15 @@ class Bot:
             return True
         except TimeoutException:
             return False
+        except (InvalidSessionIdException, WebDriverException):
+            raise SessionDeadError("Browser session dead during login check")
 
     def login(self):
-        self.bot.get(self.base_url)
+        try:
+            self.bot.get(self.base_url)
+        except (InvalidSessionIdException, WebDriverException):
+            raise SessionDeadError("Browser session dead while loading base URL")
+
         try:
             login_button = WebDriverWait(self.bot, 5, ignored_exceptions=(StaleElementReferenceException,)).until(
                 EC.element_to_be_clickable((By.XPATH, "//button[.//span[normalize-space()='Log in']]"))
@@ -323,7 +337,7 @@ class Bot:
             print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{self.username}]{ENDC} {WARNING}-{ENDC} No usernames to process.")
             return 0, True
 
-        history_file = f"./cache/{target}_{self.username}.json"
+        history_file = f"./cache/{target}.json"  # Shared history
         last_line = 0
         if os.path.isfile(history_file):
             try:
@@ -379,8 +393,7 @@ class Bot:
     # ---------- Selenium send_message_via_selenium (FIXED) ----------
     def send_message_via_selenium(self, target, counter):
         """
-        Send direct messages using Selenium – robust version.
-        Uses direct/new/ URL to avoid overlay issues.
+        Send direct messages using Selenium – shared history and fatal error detection.
         """
         file_path = f"./targetted_mass_dm/{target}.txt"
         if not os.path.isfile(file_path):
@@ -394,7 +407,7 @@ class Bot:
             print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{self.username}]{ENDC} {WARNING}-{ENDC} No usernames to process.")
             return 0, True
 
-        # history_file = f"./targetted_mass_dm/cache/{target}_{self.username}.json"
+        # Shared history file for this target
         history_file = f"./targetted_mass_dm/cache/{target}.json"
         last_line = 0
         if os.path.isfile(history_file):
@@ -419,12 +432,11 @@ class Bot:
                 continue
 
             try:
-                # Navigate directly to new message page – this is much more reliable
+                # Navigate to new message page
                 self.bot.get(self.base_url + "direct/new/")
-
                 time.sleep(4)
 
-                # Remove any "Not Now" popup
+                # Remove "Not Now" popup
                 self.bot.execute_script("""
                     Array.from(document.querySelectorAll('button')).forEach(function(button){
                         if(button.innerText == 'Not Now'){
@@ -432,10 +444,9 @@ class Bot:
                         }
                     });
                 """)
-
                 time.sleep(1)
 
-                # Click new message pencil
+                # Click pencil if needed (sometimes direct/new/ already has it)
                 self.bot.execute_script("""
                     Array.from(document.querySelectorAll("[role='button']")).forEach(function(button){
                         if(button.querySelector("[aria-label='New message']")){
@@ -444,29 +455,26 @@ class Bot:
                     });
                 """)
 
-                # Wait for the search input
+                # Wait for search input
                 search_input = WebDriverWait(self.bot, 15).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, 'input[name="queryBox"]'))
                 )
-                # Use JavaScript click to bypass intercepts
                 self.bot.execute_script("arguments[0].click();", search_input)
                 search_input.clear()
                 search_input.send_keys(username)
-
                 time.sleep(4)
 
-                # Wait for results to appear
+                # Wait for results
                 WebDriverWait(self.bot, 10).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, '[role="listbox"] [role="option"]'))
                 )
 
-                # Find and select the exact username
+                # Select exact match
                 options = self.bot.find_elements(By.CSS_SELECTOR, '[role="listbox"] [role="option"]')
                 user_found = False
                 for option in options:
                     spans = option.find_elements(By.CSS_SELECTOR, 'span[dir="auto"]')
                     if any(el.text.strip() == username for el in spans):
-                        # Click the checkbox using JS
                         checkbox = option.find_element(By.CSS_SELECTOR, 'input[name="IGDRecipientContactSearchResultCheckbox"]')
                         self.bot.execute_script("arguments[0].click();", checkbox)
                         user_found = True
@@ -474,19 +482,19 @@ class Bot:
 
                 if not user_found:
                     print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{self.username}]{ENDC} {WARNING}-{ENDC}{FAIL} Could not find{ENDC} {WARNING}->{ENDC} {OKCYAN}{username}{ENDC}")
-                    # Update history to skip this user
+                    # Skip user – update history
                     with open(history_file, 'w') as f:
                         dump({"line": idx + 1}, f)
                     continue
 
-                # Click "Chat" button
+                # Click Chat
                 chat_btn = WebDriverWait(self.bot, 5).until(
                     EC.element_to_be_clickable((By.XPATH, "//div[@role='button' and normalize-space()='Chat']"))
                 )
                 self.bot.execute_script("arguments[0].click();", chat_btn)
                 time.sleep(4)
 
-                # Find the message textbox and send text
+                # Send message
                 msg_box = WebDriverWait(self.bot, 10).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, '[role="textbox"][contenteditable="true"][data-lexical-editor="true"]'))
                 )
@@ -514,24 +522,28 @@ class Bot:
                     }));
                 """, msg_box, self.message)
 
-                # Press Enter to send
                 msg_box.send_keys(Keys.ENTER)
                 print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{self.username}]{ENDC} {WARNING}-{ENDC} sent message to {WARNING}->{ENDC} {OKCYAN}{username}{ENDC}")
 
                 sent_count += 1
+                # Update shared history after successful send
                 with open(history_file, 'w') as f:
                     dump({"line": idx + 1}, f)
 
-                # Random delay after send
                 time.sleep(random.uniform(5, 10))
 
+            except (InvalidSessionIdException, WebDriverException, ConnectionError) as e:
+                # Fatal: browser session is dead – DO NOT UPDATE HISTORY
+                LOGFILE.write(f"[{self.username}] FATAL session error on {username}: {e}\n")
+                print(f"{HEADER}[Account Group {counter}]{ENDC}{FAIL}Fatal session error on {username}: {e}{ENDC}")
+                raise SessionDeadError(f"Session died at user {username}") from e
+
             except Exception as e:
+                # Non-fatal error – skip this user and continue
                 LOGFILE.write(f"[{self.username}] Error with {username}: {e}\n")
                 print(f"{HEADER}[Account Group {counter}]{ENDC}{FAIL}Error with {username}: {e}{ENDC}")
-                # Update history to skip this user
                 with open(history_file, 'w') as f:
                     dump({"line": idx + 1}, f)
-                # Continue to next user
                 continue
 
         if sent_count == 0 and last_line >= len(usernames):
@@ -561,11 +573,11 @@ class Bot:
                 pass
 
 # ============================================================
-# Thread worker functions (unchanged)
+# Thread worker functions with retry logic
 # ============================================================
 
 def init(accounts, target, counter):
-    state = {username: {'sent_today': 0, 'completed': False} for username in accounts}
+    state = {username: {'sent_today': 0, 'completed': False, 'fail_count': 0} for username in accounts}
 
     while True:
         active = [u for u in accounts if not state[u]['completed'] and state[u]['sent_today'] < MAX_MESSAGE_PER_DAY]
@@ -590,10 +602,12 @@ def init(accounts, target, counter):
                     print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{username}]{ENDC} {WARNING}-{ENDC} Completed all followers.")
                 else:
                     print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{username}]{ENDC} {WARNING}-{ENDC} Sent {sent_count} messages this rotation.")
+                state[username]['fail_count'] = 0  # reset on success
 
             except Exception as e:
                 LOGFILE.write(f"[{username}] ERROR: {e}\n")
                 print(f"{HEADER}[Account Group {counter}]{ENDC}{FAIL}[{username}] ERROR -> {e}{ENDC}")
+                # Not a fatal session error for instagrapi, just continue
             finally:
                 if bot:
                     bot.quit_browser()
@@ -604,7 +618,7 @@ def init(accounts, target, counter):
     print(f"{HEADER}[Thread {counter}]{ENDC}{OKGREEN}[Account Group {counter}]{ENDC} {WARNING}-{ENDC}{OKGREEN}All accounts finished for today.{ENDC}")
 
 def init_selenium(accounts, target, counter):
-    state = {username: {'sent_today': 0, 'completed': False} for username in accounts}
+    state = {username: {'sent_today': 0, 'completed': False, 'fail_count': 0} for username in accounts}
 
     while True:
         active = [u for u in accounts if not state[u]['completed'] and state[u]['sent_today'] < MAX_MESSAGE_PER_DAY]
@@ -623,6 +637,7 @@ def init_selenium(accounts, target, counter):
                 if bot.challenge():
                     print(f"{HEADER}[Account Group {counter}]{ENDC}{WARNING}[{username}] Challenge detected, skipping for now.{ENDC}")
                     bot.quit_browser()
+                    # Do not count as fail, just skip this rotation
                     continue
 
                 print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{username}]{ENDC} {WARNING}-{ENDC} Sending messages via Selenium...")
@@ -634,10 +649,24 @@ def init_selenium(accounts, target, counter):
                     print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{username}]{ENDC} {WARNING}-{ENDC} Completed all targeted usernames.")
                 else:
                     print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{username}]{ENDC} {WARNING}-{ENDC} Sent {sent_count} messages this rotation.")
+                state[username]['fail_count'] = 0  # reset on success
+
+            except SessionDeadError as sde:
+                # Fatal session error – retry up to 3 times
+                state[username]['fail_count'] += 1
+                LOGFILE.write(f"[{username}] Session dead (attempt {state[username]['fail_count']}): {sde}\n")
+                print(f"{HEADER}[Account Group {counter}]{ENDC}{FAIL}[{username}] Session died (attempt {state[username]['fail_count']}/3). Retrying...{ENDC}")
+                if state[username]['fail_count'] >= 3:
+                    print(f"{HEADER}[Account Group {counter}]{ENDC}{FAIL}[{username}] Too many failures. Skipping account for today.{ENDC}")
+                    state[username]['completed'] = True  # give up on this account
+                # Do not update history – the shared history remains unchanged, so other accounts will process the pending users.
+                # We will retry the same account in the next loop iteration.
+                # The browser is already dead; we'll recreate it on next attempt.
 
             except Exception as e:
                 LOGFILE.write(f"[{username}] ERROR: {e}\n")
                 print(f"{HEADER}[Account Group {counter}]{ENDC}{FAIL}[{username}] ERROR -> {e}{ENDC}")
+                # Non-fatal, continue to next account
             finally:
                 if bot:
                     bot.quit_browser()
