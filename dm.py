@@ -9,6 +9,8 @@ import re
 import time
 import math
 import random
+import tempfile
+import zipfile
 import shutil
 import threading
 from pathlib import Path
@@ -117,6 +119,80 @@ def find_user():
     except Exception as e:
         print(f"\n{FAIL}An error occured:{ENDC} \n{WARNING}{e}{ENDC}\n")
 
+def create_proxy_extension(host, port, username, password):
+    """Creates or reuses a Chrome extension for proxy authentication."""
+    ext_dir = "./proxy_extensions"
+    os.makedirs(ext_dir, exist_ok=True)
+    ext_filename = f"proxy_auth_{host}_{port}.zip"
+    ext_path = os.path.join(ext_dir, ext_filename)
+
+    # Reuse if already exists (assumes credentials unchanged)
+    if os.path.isfile(ext_path):
+        return ext_path
+
+    manifest_json = """
+    {
+        "version": "1.0.0",
+        "manifest_version": 2,
+        "name": "Proxy Auth",
+        "permissions": [
+            "proxy",
+            "webRequest",
+            "webRequestAuthProvider",
+            "<all_urls>"
+        ],
+        "background": {
+            "scripts": ["background.js"]
+        },
+        "minimum_chrome_version": "22.0.0"
+    }
+    """
+
+    background_js = f"""
+    var config = {{
+        mode: "fixed_servers",
+        rules: {{
+            singleProxy: {{
+                scheme: "http",
+                host: "{host}",
+                port: parseInt("{port}")
+            }},
+            bypassList: ["localhost", "127.0.0.1"]
+        }}
+    }};
+
+    chrome.proxy.settings.set({{value: config, scope: "regular"}}, function() {{}});
+
+    function callbackFn(details) {{
+        return {{
+            authCredentials: {{
+                username: "{username}",
+                password: "{password}"
+            }}
+        }};
+    }}
+
+    chrome.webRequest.onAuthRequired.addListener(
+        callbackFn,
+        {{urls: ["<all_urls>"]}},
+        ['blocking']
+    );
+    """
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Write manifest and background script
+        with open(os.path.join(tmpdir, "manifest.json"), "w") as f:
+            f.write(manifest_json)
+        with open(os.path.join(tmpdir, "background.js"), "w") as f:
+            f.write(background_js)
+
+        # Zip them into the final path
+        with zipfile.ZipFile(ext_path, 'w', zipfile.ZIP_DEFLATED) as zp:
+            zp.write(os.path.join(tmpdir, "manifest.json"), "manifest.json")
+            zp.write(os.path.join(tmpdir, "background.js"), "background.js")
+
+    return ext_path
+
 # ============================================================
 # Bot Class
 # ============================================================
@@ -139,10 +215,26 @@ class Bot:
                 chrome_options.add_experimental_option("excludeSwitches", ["enable-logging"])
                 chrome_options.add_argument('--log-level=3')
                 chrome_options.add_argument("--start-maximized")
+
+                if PROXY_HOST and PROXY_PORT:
+                    ext_path = create_proxy_extension(PROXY_HOST, PROXY_PORT, PROXY_LOGIN, PROXY_PASSWORD)
+                    chrome_options.add_extension(ext_path)
+
                 self.bot = webdriver.Chrome(options=chrome_options, service=chrome_service)
             elif driver == "Firefox":
                 gecko_options = webdriver.FirefoxOptions()
                 gecko_options.add_argument("--start-maximized")
+
+                if PROXY_HOST and PROXY_PORT:
+                    proxy_url = f"http://{PROXY_LOGIN}:{PROXY_PASSWORD}@{PROXY_HOST}:{PROXY_PORT}"
+                    gecko_options.set_preference("network.proxy.type", 1)
+                    gecko_options.set_preference("network.proxy.http", PROXY_HOST)
+                    gecko_options.set_preference("network.proxy.http_port", PROXY_PORT)
+                    gecko_options.set_preference("network.proxy.ssl", PROXY_HOST)
+                    gecko_options.set_preference("network.proxy.ssl_port", PROXY_PORT)
+                    gecko_options.set_preference("network.proxy.ftp", PROXY_HOST)
+                    gecko_options.set_preference("network.proxy.ftp_port", PROXY_PORT)
+
                 self.bot = webdriver.Firefox(options=gecko_options, service=gecko_service)
             else:
                 raise ValueError("Unsupported driver")
