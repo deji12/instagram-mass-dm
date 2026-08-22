@@ -341,7 +341,7 @@ class Bot:
                     });
                 """)
 
-                # time.sleep(5)
+                time.sleep(1)
 
                 # Click new message pencil
                 self.bot.execute_script("""
