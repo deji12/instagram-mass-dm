@@ -1,5 +1,5 @@
 # ============================================================
-# bot.py – Final corrected version with shared history & robust fatal error handling
+# bot.py – Final with account suspension/challenge auto‑skip
 # ============================================================
 
 import os
@@ -45,8 +45,11 @@ chrome_service = Service('chromedriver.exe')
 # Global logger
 LOGFILE = open("./cache/logs.txt", "a")
 
-# Custom exception for session death
+# Custom exceptions
 class SessionDeadError(Exception):
+    pass
+
+class AccountUnavailableError(Exception):
     pass
 
 # ============================================================
@@ -319,10 +322,25 @@ class Bot:
             self.bot.quit()
             return
 
+        # Check if account is suspended or challenged
+        current_url = self.bot.current_url
+        if "suspended" in current_url or "challenge" in current_url or "auth_platform" in current_url:
+            print(f"{FAIL}Account {self.username} is suspended or requires challenge – skipping.{ENDC}")
+            self.bot.quit()
+            raise AccountUnavailableError(f"Account {self.username} is unavailable")
+
+        # If challenge is present, prompt for manual intervention (only if cookie mode is False)
         if self.challenge() and self.cookie is False:
             print(f"{WARNING}Challenge detected for {self.username}. Please complete manually.{ENDC}")
             while self.challenge():
                 input("Press Enter after you have completed the challenge...")
+
+        # After manual challenge, re-check URL for suspension (just in case)
+        current_url = self.bot.current_url
+        if "suspended" in current_url or "challenge" in current_url or "auth_platform" in current_url:
+            print(f"{FAIL}Account {self.username} still unavailable after challenge – skipping.{ENDC}")
+            self.bot.quit()
+            raise AccountUnavailableError(f"Account {self.username} is unavailable")
 
         if self.cookie:
             with open(cookie_path, 'w') as f:
@@ -573,7 +591,7 @@ class Bot:
                 pass
 
 # ============================================================
-# Thread worker functions with retry logic
+# Thread worker functions with retry logic & account availability check
 # ============================================================
 
 def init(accounts, target, counter):
@@ -603,6 +621,10 @@ def init(accounts, target, counter):
                 else:
                     print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{username}]{ENDC} {WARNING}-{ENDC} Sent {sent_count} messages this rotation.")
                 state[username]['fail_count'] = 0  # reset on success
+
+            except AccountUnavailableError as aue:
+                print(f"{HEADER}[Account Group {counter}]{ENDC}{FAIL}[{username}] Account unavailable: {aue}{ENDC}")
+                state[username]['completed'] = True  # skip permanently
 
             except Exception as e:
                 LOGFILE.write(f"[{username}] ERROR: {e}\n")
@@ -634,11 +656,8 @@ def init_selenium(accounts, target, counter):
                 bot = Bot(username, accounts[username], target, MESSAGE,
                           driver="Chrome", counter=counter, is_selenium_mass_dm=True)
 
-                if bot.challenge():
-                    print(f"{HEADER}[Account Group {counter}]{ENDC}{WARNING}[{username}] Challenge detected, skipping for now.{ENDC}")
-                    bot.quit_browser()
-                    # Do not count as fail, just skip this rotation
-                    continue
+                # If challenge is detected during init, the login will raise AccountUnavailableError
+                # so we don't need to call bot.challenge() again here.
 
                 print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{username}]{ENDC} {WARNING}-{ENDC} Sending messages via Selenium...")
                 sent_count, completed = bot.send_message_via_selenium(target, counter)
@@ -650,6 +669,10 @@ def init_selenium(accounts, target, counter):
                 else:
                     print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{username}]{ENDC} {WARNING}-{ENDC} Sent {sent_count} messages this rotation.")
                 state[username]['fail_count'] = 0  # reset on success
+
+            except AccountUnavailableError as aue:
+                print(f"{HEADER}[Account Group {counter}]{ENDC}{FAIL}[{username}] Account unavailable: {aue}{ENDC}")
+                state[username]['completed'] = True  # skip permanently
 
             except SessionDeadError as sde:
                 # Fatal session error – retry up to 3 times
