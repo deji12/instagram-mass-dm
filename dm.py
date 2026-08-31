@@ -256,6 +256,9 @@ class Bot:
             challenge = self.bot.execute_script("""
                 return window.location.href.includes("/challenge/") || 
                     window.location.href.includes("auth_platform/codeentry/") ||
+                    window.location.href.includes("auth_platform/text_captcha/") ||
+                    window.location.href.includes("auth_platform/") ||
+                    window.location.href.includes("consent/") ||
                     window.location.href.includes("accounts/suspended/") ||
                     window.location.href.includes("auth_platform/no_challenge//") 
             """)
@@ -324,23 +327,31 @@ class Bot:
 
         # Check if account is suspended or challenged
         current_url = self.bot.current_url
-        if "suspended" in current_url or "challenge" in current_url or "auth_platform" in current_url:
+        if not self.cookie and ("suspended" in current_url or "challenge" in current_url or "auth_platform" in current_url):
             print(f"{FAIL}Account {self.username} is suspended or requires challenge – skipping.{ENDC}")
             self.bot.quit()
             raise AccountUnavailableError(f"Account {self.username} is unavailable")
 
         # If challenge is present, prompt for manual intervention (only if cookie mode is False)
-        if self.challenge() and self.cookie is False:
-            print(f"{WARNING}Challenge detected for {self.username}. Please complete manually.{ENDC}")
+        if self.challenge() and self.cookie:
+            print(f"\n{WARNING}Challenge detected for {self.username}. Please complete manually.{ENDC}")
+
             while self.challenge():
-                input("Press Enter after you have completed the challenge...")
+                operation = input("1. Press ↵ Enter when done with challenge.\n2. Press 2 to skip account\n:")
+                if operation == "2":  
+                    self.bot.close()  
+                    return
 
         # After manual challenge, re-check URL for suspension (just in case)
         current_url = self.bot.current_url
         if "suspended" in current_url or "challenge" in current_url or "auth_platform" in current_url:
             print(f"{FAIL}Account {self.username} still unavailable after challenge – skipping.{ENDC}")
-            self.bot.quit()
-            raise AccountUnavailableError(f"Account {self.username} is unavailable")
+
+            if self.cookie:
+                return 
+            else:
+                self.bot.quit()
+                raise AccountUnavailableError(f"Account {self.username} is unavailable")
 
         if self.cookie:
             with open(cookie_path, 'w') as f:
