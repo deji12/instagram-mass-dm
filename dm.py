@@ -38,10 +38,6 @@ from instagrapi.exceptions import DirectMessageRequestsDisabled
 
 from configuration import *
 
-# Services
-gecko_service = Service('geckodriver.exe')
-chrome_service = Service('chromedriver.exe')
-
 # Global logger
 LOGFILE = open("./cache/logs.txt", "a")
 
@@ -218,6 +214,7 @@ class Bot:
 
         if not is_instagrapi_request:
             if driver == "Chrome":
+                chrome_service = Service('chromedriver.exe')
                 chrome_options = webdriver.ChromeOptions()
                 chrome_options.add_experimental_option("excludeSwitches", ["enable-logging"])
                 chrome_options.add_argument('--log-level=3')
@@ -230,6 +227,7 @@ class Bot:
 
                 self.bot = webdriver.Chrome(options=chrome_options, service=chrome_service)
             elif driver == "Firefox":
+                gecko_service = Service('geckodriver.exe')
                 gecko_options = webdriver.FirefoxOptions()
                 gecko_options.add_argument("--start-maximized")
 
