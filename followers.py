@@ -147,19 +147,20 @@ def fetch_target_account_followers():
     target_accounts = targets()
     threads = []
 
-    counter = 1
+    # counter = 1
 
-    if len(target_accounts) != NUMBER_OF_SCRAPING_THREADS: 
-        print(f"{FAIL}Your{ENDC} {WARNING}targets.txt{ENDC} {FAIL}file must have {NUMBER_OF_SCRAPING_THREADS} targets.{ENDC}\n")
+    # if len(target_accounts) != NUMBER_OF_SCRAPING_THREADS: 
+    #     print(f"{FAIL}Your{ENDC} {WARNING}targets.txt{ENDC} {FAIL}file must have {NUMBER_OF_SCRAPING_THREADS} targets.{ENDC}\n")
     
-    else:
-        for account in SCRAPE_ACCOUNTS:
-            thread = threading.Thread(target=run_bot, name=f"Scrape Group {counter}", args=(target_accounts[counter - 1], counter))
-            threads.append(thread)
-            print(f"{HEADER}[{thread.name}]{ENDC} - {OKGREEN}{account} scraping folllowers from {target_accounts[counter - 1]}{ENDC}")
+    # else:
+    for i in range(len(target_accounts)):
+        thread = threading.Thread(target=run_bot, name=f"Scrape Group {i + 1}", args=(target_accounts[i], i + 1))
+        threads.append(thread)
+        # print(f"{HEADER}[{thread.name}]{ENDC} - {OKGREEN}{account} scraping folllowers from {target_accounts[counter - 1]}{ENDC}")
+        print(f"{HEADER}[{thread.name}]{ENDC} - {OKGREEN}scraping folllowers from {target_accounts[i]}{ENDC}")
 
-            counter += 1
+        # counter += 1
 
-        for thread in threads: 
-            thread.start()
+    for thread in threads: 
+        thread.start()
     
