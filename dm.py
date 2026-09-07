@@ -357,7 +357,7 @@ class Bot:
             self.bot.quit()
             return
 
-    # ---------- Instagrapi send_message (unchanged) ----------
+    # ---------- Instagrapi send_message (UPDATED) ----------
     def send_message(self, target, counter):
         users = get_saved_users(target)
         if not users:
@@ -378,14 +378,48 @@ class Bot:
         proxy_url = f"http://{PROXY_LOGIN}:{PROXY_PASSWORD}@{PROXY_HOST}:{PROXY_PORT}"
         cl.set_proxy(proxy_url)
 
-        session_id = get_saved_session_id(self.username)
-        if not session_id:
-            print(f"{FAIL}No session ID for {self.username}. Run cookie generation first.{ENDC}")
-            return 0, False
-        cl.login_by_sessionid(session_id)
+        # Path for instagrapi session settings
+        instagrapi_session_dir = "./cookies/instagrapi"
+        os.makedirs(instagrapi_session_dir, exist_ok=True)
+        settings_path = os.path.join(instagrapi_session_dir, f"{self.username}.json")
+
+        login_success = False
+
+        # 1. Try to load existing instagrapi session
+        if os.path.isfile(settings_path):
+            try:
+                cl.load_settings(settings_path)
+                # Login with credentials; instagrapi will reuse the saved session if valid
+                cl.login(self.username, self.password)
+                login_success = True
+                print(f"{OKGREEN}[{self.username}] Logged in using instagrapi session.{ENDC}")
+            except Exception as e:
+                print(f"{WARNING}[{self.username}] Failed to load instagrapi session: {e}. Falling back to session ID.{ENDC}")
+                # Fall through to next method
+
+        # 2. If that failed, use the Selenium-generated sessionid cookie
+        if not login_success:
+            session_id = get_saved_session_id(self.username)
+            if not session_id:
+                print(f"{FAIL}No session ID for {self.username}. Run cookie generation first.{ENDC}")
+                return 0, False
+            try:
+                cl.login_by_sessionid(session_id)
+                login_success = True
+                print(f"{OKGREEN}[{self.username}] Logged in using session ID from Selenium cookie.{ENDC}")
+            except Exception as e:
+                print(f"{FAIL}Login failed for {self.username}: {e}{ENDC}")
+                return 0, False
+
+        # 3. Dump the session settings to keep it fresh (for future runs)
+        try:
+            cl.dump_settings(settings_path)
+        except Exception as e:
+            LOGFILE.write(f"[{self.username}] Failed to dump settings: {e}\n")
 
         sent_count = 0
         completed = True
+
         for idx, user in enumerate(users):
             if idx < last_line:
                 continue
@@ -398,14 +432,17 @@ class Bot:
                 username = user[0]
                 user_id = user[1]
 
-                self.message = f"Hello {username}! {self.message}"
+                # Personalize message (avoid modifying self.message permanently)
+                personalized_message = f"Hello {username}! {self.message}"
 
-                cl.direct_send(text=self.message, user_ids=[user_id])
+                cl.direct_send(text=personalized_message, user_ids=[user_id])
                 print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{self.username}]{ENDC} {WARNING}-{ENDC} sent message to {WARNING}->{ENDC} {OKCYAN}{user_id}{ENDC}")
+
                 sent_count += 1
                 with open(history_file, 'w') as f:
                     dump({"line": idx + 1}, f)
                 time.sleep(random.uniform(3, 7))
+
             except DirectMessageRequestsDisabled:
                 print(f"{HEADER}[Account Group {counter}]{ENDC}{FAIL}The recipient {user_id} does not accept new DM requests.{ENDC}")
                 with open(history_file, 'w') as f:
