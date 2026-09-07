@@ -48,6 +48,9 @@ class SessionDeadError(Exception):
 class AccountUnavailableError(Exception):
     pass
 
+class AccountChallengeError(Exception):
+    pass
+
 # ============================================================
 # Helper functions (unchanged)
 # ============================================================
@@ -441,17 +444,23 @@ class Bot:
                 sent_count += 1
                 with open(history_file, 'w') as f:
                     dump({"line": idx + 1}, f)
-                time.sleep(random.uniform(3, 7))
+                time.sleep(random.uniform(10, 20))  # 10–20 seconds between each message
 
             except DirectMessageRequestsDisabled:
                 print(f"{HEADER}[Account Group {counter}]{ENDC}{FAIL}The recipient {user_id} does not accept new DM requests.{ENDC}")
                 with open(history_file, 'w') as f:
                     dump({"line": idx + 1}, f)
                 continue
+
             except Exception as e:
-                LOGFILE.write(f"[{self.username}] ERROR sending to {user_id}: {e}\n")
-                print(f"{HEADER}[Account Group {counter}]{ENDC}{FAIL}Error sending to {user_id}: {e}{ENDC}")
-                continue
+                error_msg = str(e)
+                if "challenge_required" in error_msg or "Manual verification required" in error_msg:
+                    LOGFILE.write(f"[{self.username}] Challenge required: {e}\n")
+                    raise AccountChallengeError(f"{self.username} challenged") from e
+                else:
+                    LOGFILE.write(f"[{self.username}] ERROR sending to {user_id}: {e}\n")
+                    print(f"{HEADER}[Account Group {counter}]{ENDC}{FAIL}Error sending to {user_id}: {e}{ENDC}")
+                    continue
 
         if sent_count == 0 and last_line >= len(users):
             completed = True
@@ -673,6 +682,10 @@ def init(accounts, target, counter):
                 else:
                     print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{username}]{ENDC} {WARNING}-{ENDC} Sent {sent_count} messages this rotation.")
                 state[username]['fail_count'] = 0  # reset on success
+
+            except AccountChallengeError as ace:
+                print(f"{HEADER}[Account Group {counter}]{ENDC}{FAIL}[{username}] Account challenged: {ace}{ENDC}")
+                state[username]['completed'] = True  # skip permanently for today
 
             except AccountUnavailableError as aue:
                 print(f"{HEADER}[Account Group {counter}]{ENDC}{FAIL}[{username}] Account unavailable: {aue}{ENDC}")
