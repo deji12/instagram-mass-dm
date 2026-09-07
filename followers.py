@@ -69,8 +69,10 @@ def get_followers_via_hiker(target, counter):
             if not follower_username:
                 continue
 
-            if _user_id and user_id not in scraped_followers:
-                scraped_followers.add(_user_id)
+            username_and_user_id = f"{follower_username},{_user_id}"
+
+            if (_user_id and follower_username) and username_and_user_id not in scraped_followers:
+                scraped_followers.add(username_and_user_id)
                 number_of_scrapped += 1
 
             print(
@@ -83,8 +85,8 @@ def get_followers_via_hiker(target, counter):
             # Save every 50 collected usernames
             if len(scraped_followers) >= 50:
                 with open(file_path, 'a', encoding='utf-8') as file:
-                    for username in scraped_followers:
-                        file.write(f"{username}\n")
+                    for user in scraped_followers:
+                        file.write(f"{user}\n")
 
                 print(
                     f"{HEADER}[Scrape Group {counter}]{ENDC}"

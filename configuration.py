@@ -2,7 +2,11 @@ from decouple import config
 
 # MESSAGE
 MESSAGE = ("""
+Are you using Instagram to reach new customers, or mainly just posting?
 
+At inn0web, we automate Instagram DM outreach so you can promote your products and services without spending hours sending messages manually.
+
+Message us at @inn0webautomations for a quick demo!
 """)
 
 # DO NOT MODIFY

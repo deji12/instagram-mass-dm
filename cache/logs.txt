@@ -39751,3 +39751,4 @@ Stacktrace:
 
 [elifevcibirer] ERROR: [WinError 5] Access is denied: 'proxy_ext\\manifest.json'
 [ggfzjvfe] ERROR: [WinError 5] Access is denied: 'proxy_ext\\manifest.json'
+[antonycesena] ERROR: challenge_required

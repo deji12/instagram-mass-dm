@@ -64,7 +64,7 @@ def account():
                 accounts[ordered[0]] = ordered[1]
     return accounts
 
-def get_saved_user_ids(target):
+def get_saved_users(target):
     path = f"users/{target}.txt"
     if not os.path.isfile(path):
         return []
@@ -350,7 +350,7 @@ class Bot:
             else:
                 self.bot.quit()
                 raise AccountUnavailableError(f"Account {self.username} is unavailable")
-
+        
         if self.cookie:
             with open(cookie_path, 'w') as f:
                 dump(self.bot.get_cookie('sessionid'), f)
@@ -359,8 +359,8 @@ class Bot:
 
     # ---------- Instagrapi send_message (unchanged) ----------
     def send_message(self, target, counter):
-        user_ids = get_saved_user_ids(target)
-        if not user_ids:
+        users = get_saved_users(target)
+        if not users:
             print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{self.username}]{ENDC} {WARNING}-{ENDC} No usernames to process.")
             return 0, True
 
@@ -386,7 +386,7 @@ class Bot:
 
         sent_count = 0
         completed = True
-        for idx, user_id in enumerate(user_ids):
+        for idx, user in enumerate(users):
             if idx < last_line:
                 continue
             if sent_count >= MAX_MESSAGE_PER_ROTATION:
@@ -394,6 +394,12 @@ class Bot:
                 break
 
             try:
+                user = user.split(",")
+                username = user[0]
+                user_id = user[1]
+
+                self.message = f"Hello {username}! {self.message}"
+
                 cl.direct_send(text=self.message, user_ids=[user_id])
                 print(f"{HEADER}[Account Group {counter}]{ENDC}{OKGREEN}[{self.username}]{ENDC} {WARNING}-{ENDC} sent message to {WARNING}->{ENDC} {OKCYAN}{user_id}{ENDC}")
                 sent_count += 1
@@ -410,9 +416,9 @@ class Bot:
                 print(f"{HEADER}[Account Group {counter}]{ENDC}{FAIL}Error sending to {user_id}: {e}{ENDC}")
                 continue
 
-        if sent_count == 0 and last_line >= len(user_ids):
+        if sent_count == 0 and last_line >= len(users):
             completed = True
-        elif sent_count < MAX_MESSAGE_PER_ROTATION and last_line + sent_count >= len(user_ids):
+        elif sent_count < MAX_MESSAGE_PER_ROTATION and last_line + sent_count >= len(users):
             completed = True
 
         return sent_count, completed
